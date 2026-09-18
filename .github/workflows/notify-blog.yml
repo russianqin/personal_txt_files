@@ -1,15 +1,16 @@
 name: 通知博客重建
 
-# 笔记更新时，调用博客仓库的 Gmeek 工作流，让「日日新」页面立刻重建。
-# 依赖仓库 Secret：BLOG_ACTIONS_TOKEN
-#   （fine-grained token，仅授予 russianqin/russianqin.github.io 的 Actions: Read and write）
-# 若未配置该 Secret，本工作流会失败，但不影响笔记仓库本身。
+# 日日新.md 更新后，调用博客仓库的 Gmeek 工作流（workflow_dispatch）触发重建。
+#
+# 前置条件：在 personal_txt_files 里配置 Secret「BLOG_ACTIONS_TOKEN」
+#   fine-grained token，仅授权 russianqin/russianqin.github.io，权限 Actions: Read and write
+# 未配置或已失效时本工作流会失败（红叉），但不会影响笔记仓库本身。
 
 on:
   push:
     branches: [master]
     paths:
-      - "**/*.md"
+      - "日日新.md"
   workflow_dispatch:
 
 jobs:
@@ -17,11 +18,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger blog rebuild
+        env:
+          BLOG_TOKEN: ${{ secrets.BLOG_ACTIONS_TOKEN }}
         run: |
-          curl -sSf -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.BLOG_ACTIONS_TOKEN }}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/russianqin/russianqin.github.io/actions/workflows/Gmeek.yml/dispatches" \
-            -d '{"ref":"main"}'
-          echo "已通知博客重建"
+          set -u
+
+          if [ -z "${BLOG_TOKEN:-}" ]; then
+            echo "::error::未配置 Secret BLOG_ACTIONS_TOKEN。请到 personal_txt_files → Settings → Secrets and variables → Actions 添加，值填 fine-grained token（对 russianqin/russianqin.github.io 拥有 Actions: Read and write）。"
+            exit 1
+          fi
+
+          URL="https://api.github.com/repos/russianqin/russianqin.github.io/actions/workflows/Gmeek.yml/dispatches"
+
+          for attempt in 1 2 3; do
+            status=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${BLOG_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${URL}" \
+              -d '{"ref":"main"}') || status="000"
+
+            echo "第 ${attempt} 次请求：HTTP ${status}"
+
+            if [ "${status}" = "204" ]; then
+              echo "已通知博客重建：https://github.com/russianqin/russianqin.github.io/actions"
+              exit 0
+            fi
+
+            case "${status}" in
+              5*|000) sleep $((attempt * 5)) ;;
+              *) break ;;
+            esac
+          done
+
+          cat /tmp/resp.json 2>/dev/null || true
+          case "${status}" in
+            401) echo "::error::HTTP 401 凭据无效：Secret 为空、token 已过期，或填错了内容。" ;;
+            403) echo "::error::HTTP 403 权限不足：token 需要对 russianqin/russianqin.github.io 拥有 Actions: Read and write。" ;;
+            404) echo "::error::HTTP 404 找不到仓库或工作流：fine-grained token 没有勾选该仓库（或该仓库不在 token 的 Resource owner 名下），或工作流文件名不是 Gmeek.yml。" ;;
+            422) echo "::error::HTTP 422 参数被拒绝：确认 Gmeek.yml 的 workflow_dispatch 没有定义必填 inputs，dispatches 请求只能带 ref。" ;;
+            *)   echo "::error::触发博客重建失败，HTTP ${status}" ;;
+          esac
+          exit 1
