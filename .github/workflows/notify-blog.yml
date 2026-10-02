@@ -1,6 +1,6 @@
 name: 通知博客重建
 
-# 日日新.md 更新后，调用博客仓库的 Gmeek 工作流（workflow_dispatch）触发重建。
+# 日日新.md / 释略大典.md 更新后，调用博客仓库的 Gmeek 工作流（workflow_dispatch）触发重建。
 #
 # 前置条件：在 personal_txt_files 里配置 Secret「BLOG_ACTIONS_TOKEN」
 #   fine-grained token，仅授权 russianqin/russianqin.github.io，权限 Actions: Read and write
@@ -11,6 +11,7 @@ on:
     branches: [master]
     paths:
       - "日日新.md"
+      - "释略大典.md"
   workflow_dispatch:
 
 jobs:
